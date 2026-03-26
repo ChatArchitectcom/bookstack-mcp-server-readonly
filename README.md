@@ -1,131 +1,119 @@
-# BookStack MCP Server
+# BookStack MCP Server (Read-Only)
 
-Connect BookStack to Claude and other AI assistants through the Model Context Protocol (MCP). This server provides complete access to your BookStack knowledge base with 47+ tools covering all API endpoints.
+Connect BookStack to Claude and other AI assistants through the Model Context Protocol (MCP).
 
-This server supports two transport modes: **Streamable HTTP** and **Stdio**.
+By default this server runs in **public read-only mode**: only 18 read/search/export tools are exposed, write operations are blocked, and per-request credential headers are rejected. It is safe to deploy publicly without authentication middleware.
 
-- **Streamable HTTP (Default)**: A stateless HTTP transport. Authentication parameters can be overridden per-request using HTTP headers (`x-bookstack-url` and `x-bookstack-token`).
-- **Stdio Mode**: Standard input/output for local integration (e.g., with Claude Desktop). Set `MCP_TRANSPORT=stdio` to enable.
+## Transport modes
 
-## ✨ What You Get
+- **Streamable HTTP** (default) — stateless, one MCP connection per request, port 3000
+- **Stdio** — for local use with Claude Desktop; set `MCP_TRANSPORT=stdio`
 
-- **Complete BookStack Integration** - Access all your books, pages, chapters, and content
-- **47+ MCP Tools** - Full CRUD operations for every BookStack feature
-- **Search & Export** - Find content and export in multiple formats
-- **User Management** - Handle users, roles, and permissions
-- **Production Ready** - Rate limiting, validation, error handling, and logging
+## Read-only mode (default)
 
-## 🚀 Quick Start
+When `PUBLIC_READ_ONLY=true` (the default):
+
+- Only read, search, and export tools are registered — no create/update/delete.
+- `UserResources`, `RoleTools`, `AttachmentTools`, `ImageTools`, `RecycleBinTools`, `PermissionTools`, `AuditTools` are not loaded.
+- `x-bookstack-url` and `x-bookstack-token` request headers are **rejected with HTTP 400**.
+- Even if a blocked tool name is sent directly, the server returns: `Tool disabled on this public read-only server: <name>`.
+
+To enable full CRUD mode set `PUBLIC_READ_ONLY=false`. To allow per-request credential overrides set `ALLOW_BOOKSTACK_HEADER_OVERRIDES=true`.
+
+### Available tools in read-only mode (18 total)
+
+| Category | Tools |
+|----------|-------|
+| Books | `bookstack_books_list`, `bookstack_books_read`, `bookstack_books_export` |
+| Pages | `bookstack_pages_list`, `bookstack_pages_read`, `bookstack_pages_export` |
+| Chapters | `bookstack_chapters_list`, `bookstack_chapters_read`, `bookstack_chapters_export` |
+| Shelves | `bookstack_shelves_list`, `bookstack_shelves_read` |
+| Search | `bookstack_search` |
+| System | `bookstack_system_info` |
+| Meta | `bookstack_server_info`, `bookstack_tool_categories`, `bookstack_usage_examples`, `bookstack_error_guides`, `bookstack_help` |
+
+## Configuration
+
+Required environment variables:
 
 ```bash
-# Install globally
-npm install -g bookstack-mcp-server
-
-# Or run directly (starts HTTP server by default)
-npx bookstack-mcp-server
+BOOKSTACK_BASE_URL=https://your-bookstack.example.com/api
+BOOKSTACK_API_TOKEN=token_id:token_secret
 ```
 
-### Add to Claude
+Key optional variables (all have safe defaults):
 
-To use with Claude Desktop (requires Stdio mode):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PUBLIC_READ_ONLY` | `true` | Restrict to read-only tools |
+| `ALLOW_BOOKSTACK_HEADER_OVERRIDES` | `false` | Allow per-request credential headers |
+| `PORT` | `3000` | HTTP listen port |
+| `MCP_TRANSPORT` | `http` | `http` or `stdio` |
+| `LOG_LEVEL` | `info` | `error`, `warn`, `info`, `debug` |
+| `LOG_FORMAT` | `pretty` | `json` or `pretty` |
+
+See `.env.example` for the full list.
+
+## Docker deployment
 
 ```bash
-# For Claude Code
+# 1. Configure credentials
+cp .env.example .env
+# Edit .env — set BOOKSTACK_BASE_URL and BOOKSTACK_API_TOKEN
+
+# 2. Build and start
+docker compose up -d
+
+# 3. Verify
+curl http://localhost:3000/healthz
+# → {"ok":true}
+```
+
+### Verification checklist
+
+```bash
+# Health endpoint
+curl http://localhost:3000/healthz
+
+# Header override must be rejected with 400
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/message \
+  -H "Content-Type: application/json" \
+  -H "x-bookstack-url: https://evil.example.com" \
+  -d '{}'
+# → 400
+
+# Use your MCP client to list tools — only read-only names should appear
+# Use your MCP client to call bookstack_books_create
+# → "Tool disabled on this public read-only server: bookstack_books_create"
+```
+
+## Local development
+
+```bash
+npm install
+cp .env.example .env   # set BOOKSTACK_BASE_URL and BOOKSTACK_API_TOKEN
+npm run dev            # ts-node single run
+npm run watch          # auto-restart on file changes
+npm run build          # compile to dist/
+npm test               # Jest
+```
+
+### Add to Claude Code (stdio mode)
+
+```bash
 claude mcp add bookstack npx bookstack-mcp-server \
-  --env BOOKSTACK_BASE_URL=https://your-bookstack.com/api \
+  --env BOOKSTACK_BASE_URL=https://your-bookstack.example.com/api \
   --env BOOKSTACK_API_TOKEN=token_id:token_secret \
   --env MCP_TRANSPORT=stdio
 ```
 
-### Configuration
+## Documentation
 
-Set these environment variables:
+- [Setup Guide](docs/setup-guide.md)
+- [Tools Overview](docs/tools-overview.md)
+- [Resources Guide](docs/resources-guide.md)
+- [Examples & Workflows](docs/examples-and-workflows.md)
 
-```bash
-export BOOKSTACK_BASE_URL="https://your-bookstack.com/api"
-export BOOKSTACK_API_TOKEN="token_id:token_secret"
-# Optional: Set transport mode (http or stdio)
-export MCP_TRANSPORT="http" 
-```
+## License
 
-> 💡 **Token Format**: Combine your BookStack Token ID and Token Secret as `token_id:token_secret`
-
-> 💡 Need detailed setup? See the complete [Setup Guide](docs/setup-guide.md)
-
-## 🛠️ Available Tools
-
-**47+ tools across 13 categories:**
-
-- **📚 Books** - Create, read, update, delete, and export books
-- **📄 Pages** - Manage pages with HTML/Markdown content
-- **📑 Chapters** - Organize pages within books
-- **📚 Shelves** - Group books into collections
-- **👥 Users & Roles** - Complete user management
-- **🔍 Search** - Advanced search across all content
-- **📎 Attachments & Images** - File management
-- **🔐 Permissions** - Content access control
-- **🗑️ Recycle Bin** - Deleted item recovery
-- **📊 Audit Log** - Activity tracking
-- **⚙️ System Info** - Instance health and information
-
-> 📖 See the complete [Tools Overview](docs/tools-overview.md) for detailed documentation
-
-## 📚 Documentation
-
-Find comprehensive guides in the `docs/` folder:
-
-- **[Setup Guide](docs/setup-guide.md)** - Complete installation and configuration
-- **[API Reference](docs/api-reference.md)** - All endpoints with examples
-- **[Tools Overview](docs/tools-overview.md)** - Every tool explained
-- **[Resources Guide](docs/resources-guide.md)** - Resource access patterns
-- **[Examples & Workflows](docs/examples-and-workflows.md)** - Real-world usage
-
-## ⚡ Quick Examples
-
-**List all books:**
-```javascript
-bookstack_books_list({ count: 10, sort: "updated_at" })
-```
-
-**Create a new page:**
-```javascript
-bookstack_pages_create({
-  name: "Getting Started",
-  book_id: 1,
-  markdown: "# Welcome\nYour content here..."
-})
-```
-
-**Search for content:**
-```javascript
-bookstack_search({ query: "API documentation", count: 20 })
-```
-
-## 🛠️ Development
-
-```bash
-git clone <repository-url>
-cd bookstack-mcp-server
-npm install
-npm run dev
-```
-
-> 🔧 See the [Setup Guide](docs/setup-guide.md) for development, Docker, and production deployment
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## 🌟 Community
-
-This project is part of the BookStack ecosystem! Check out other API-based tools and scripts in the [BookStack API Scripts](https://codeberg.org/bookstack/api-scripts) repository.
-
-## 🆘 Support
-
-- **📚 Documentation**: Complete guides in the [docs/](docs/) folder
-- **🐛 Issues**: [GitHub Issues](https://github.com/pnocera/bookstack-mcp-server/issues)
-- **💬 Discussions**: [GitHub Discussions](https://github.com/pnocera/bookstack-mcp-server/discussions)
-
----
-
-**Built with ❤️ for the BookStack community**
+MIT — see [LICENSE](LICENSE).
